@@ -125,6 +125,26 @@ The converter removes duplicates in two stages:
 - `thread_id` stays consistent across all extracted messages that came from the same original thread.
 - `message_id` is generated from `from` and `to`, with a numeric suffix added when needed to keep each output row unique.
 
+## CSV Output Behavior
+
+- All CSV fields are written with double quotes.
+- The output is UTF-8 encoded.
+- If the generated CSV would exceed 128 MiB, the converter automatically splits it into multiple files.
+
+For example, if you request:
+
+```bash
+python3 json_to_csv.py input.json --split-thread -o output.csv
+```
+
+The script may produce:
+
+- `output.csv`
+- `output_part2.csv`
+- `output_part3.csv`
+
+Each file includes the same header row and continues the data from the previous file.
+
 ## Basic Examples
 
 Convert a file in the current folder:
