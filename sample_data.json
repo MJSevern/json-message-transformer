@@ -1,0 +1,35 @@
+[
+  {
+    "id": 1,
+    "name": "Alice Johnson",
+    "email": "alice@example.com",
+    "department": {
+      "name": "Engineering",
+      "location": "New York"
+    },
+    "skills": ["Python", "JavaScript", "React"],
+    "salary": 95000
+  },
+  {
+    "id": 2,
+    "name": "Bob Smith",
+    "email": "bob@example.com",
+    "department": {
+      "name": "Marketing",
+      "location": "Los Angeles"
+    },
+    "skills": ["SEO", "Content Marketing"],
+    "salary": 65000
+  },
+  {
+    "id": 3,
+    "name": "Carol Davis",
+    "email": "carol@example.com",
+    "department": {
+      "name": "Engineering",
+      "location": "San Francisco"
+    },
+    "skills": ["Database Design", "SQL", "Python"],
+    "salary": 102000
+  }
+]
