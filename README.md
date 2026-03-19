@@ -129,7 +129,7 @@ The converter removes duplicates in two stages:
 
 - All CSV fields are written with double quotes.
 - The output is UTF-8 encoded.
-- If the generated CSV would exceed 128 MiB, the converter automatically splits it into multiple files.
+- If the generated CSV would exceed 100 MiB, the converter automatically splits it into multiple files.
 
 For example, if you request:
 

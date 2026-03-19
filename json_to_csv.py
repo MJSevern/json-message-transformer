@@ -26,7 +26,7 @@ THREAD_SPLIT_MARKERS = (
     "Mensagem original",
 )
 MAX_MESSAGE_BODY_LENGTH = 65536
-MAX_CSV_FILE_SIZE_BYTES = 128 * 1024 * 1024
+MAX_CSV_FILE_SIZE_BYTES = 100 * 1024 * 1024
 HEADER_ALIASES = {
     "from": "from",
     "de": "from",
@@ -230,7 +230,7 @@ def calculate_csv_row_size(fieldnames: List[str], row: Dict[str, Any], include_h
 
 
 def write_csv_rows(rows: List[Dict[str, Any]], fieldnames: List[str], output_path: Path) -> List[Path]:
-    """Write CSV rows, splitting into multiple files if the output exceeds 128 MiB."""
+    """Write CSV rows, splitting into multiple files if the output exceeds 100 MiB."""
     part_number = 1
     current_path = build_output_path(output_path, part_number)
     current_file = open(current_path, 'w', newline='', encoding='utf-8')
