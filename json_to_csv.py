@@ -572,7 +572,11 @@ def json_to_csv(
     # Write to CSV
     try:
         with open(output_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames.keys())
+            writer = csv.DictWriter(
+                f,
+                fieldnames=fieldnames.keys(),
+                quoting=csv.QUOTE_ALL,
+            )
             writer.writeheader()
             for row in rows:
                 if isinstance(row, dict):
