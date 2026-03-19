@@ -10,6 +10,7 @@ import sys
 import argparse
 import re
 import hashlib
+import io
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -25,6 +26,7 @@ THREAD_SPLIT_MARKERS = (
     "Mensagem original",
 )
 MAX_MESSAGE_BODY_LENGTH = 65536
+MAX_CSV_FILE_SIZE_BYTES = 128 * 1024 * 1024
 HEADER_ALIASES = {
     "from": "from",
     "de": "from",
@@ -196,6 +198,69 @@ def assign_unique_message_ids(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]
         row["message_id"] = base_id if count == 1 else f"{base_id}_{count}"
 
     return rows
+
+
+def build_output_path(output_path: Path, part_number: int) -> Path:
+    """Return the output path for a split CSV part."""
+    if part_number == 1:
+        return output_path
+    return output_path.with_name(f"{output_path.stem}_part{part_number}{output_path.suffix}")
+
+
+def calculate_csv_row_size(fieldnames: List[str], row: Dict[str, Any], include_header: bool = False) -> int:
+    """Return the UTF-8 byte size of a CSV row using the real writer settings."""
+    buffer = io.StringIO()
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=fieldnames,
+        quoting=csv.QUOTE_ALL,
+    )
+    if include_header:
+        writer.writeheader()
+    writer.writerow(row)
+    return len(buffer.getvalue().encode("utf-8"))
+
+
+def write_csv_rows(rows: List[Dict[str, Any]], fieldnames: List[str], output_path: Path) -> List[Path]:
+    """Write CSV rows, splitting into multiple files if the output exceeds 128 MiB."""
+    part_number = 1
+    current_path = build_output_path(output_path, part_number)
+    current_file = open(current_path, 'w', newline='', encoding='utf-8')
+    writer = csv.DictWriter(
+        current_file,
+        fieldnames=fieldnames,
+        quoting=csv.QUOTE_ALL,
+    )
+    writer.writeheader()
+    current_size = current_file.tell()
+    current_rows = 0
+    written_paths = [current_path]
+
+    try:
+        for row in rows:
+            row_size = calculate_csv_row_size(fieldnames, row)
+            if current_rows > 0 and current_size + row_size > MAX_CSV_FILE_SIZE_BYTES:
+                current_file.close()
+                part_number += 1
+                current_path = build_output_path(output_path, part_number)
+                current_file = open(current_path, 'w', newline='', encoding='utf-8')
+                writer = csv.DictWriter(
+                    current_file,
+                    fieldnames=fieldnames,
+                    quoting=csv.QUOTE_ALL,
+                )
+                writer.writeheader()
+                current_size = current_file.tell()
+                current_rows = 0
+                written_paths.append(current_path)
+
+            writer.writerow(row)
+            current_size = current_file.tell()
+            current_rows += 1
+    finally:
+        current_file.close()
+
+    return written_paths
 
 
 def normalize_message_body_for_dedupe(text: str) -> str:
@@ -571,27 +636,25 @@ def json_to_csv(
     
     # Write to CSV
     try:
-        with open(output_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(
-                f,
-                fieldnames=fieldnames.keys(),
-                quoting=csv.QUOTE_ALL,
-            )
-            writer.writeheader()
-            for row in rows:
-                if isinstance(row, dict):
-                    writer.writerow(row)
+        written_paths = write_csv_rows(
+            [row for row in rows if isinstance(row, dict)],
+            list(fieldnames.keys()),
+            output_path,
+        )
         
         print(f"✓ Successfully converted JSON to CSV")
         print(f"  Input:  {input_path}")
-        print(f"  Output: {output_path}")
+        if len(written_paths) == 1:
+            print(f"  Output: {written_paths[0]}")
+        else:
+            print(f"  Output: {written_paths[0]} (+ {len(written_paths) - 1} more files)")
         if email_dataset:
             print(f"  Source duplicates removed: {removed_duplicates}")
             print(f"  Split-message duplicates removed: {removed_split_duplicates}")
         print(f"  Rows:   {len(rows)}")
         print(f"  Columns: {len(fieldnames)}")
         
-        return str(output_path)
+        return str(written_paths[0])
     
     except IOError as e:
         raise IOError(f"Failed to write CSV file: {e}")
