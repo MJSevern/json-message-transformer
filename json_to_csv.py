@@ -158,6 +158,12 @@ def sanitize_message_part(value: str) -> str:
     return cleaned.strip("_")
 
 
+def stable_subject_hash(subject: str, length: int = 12) -> str:
+    """Return a deterministic ASCII-safe hash prefix for the subject."""
+    digest = hashlib.sha256((subject or "").strip().lower().encode("utf-8")).hexdigest()
+    return digest[:length]
+
+
 def dedupe_email_rows(rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
     """Remove duplicate email records before any message splitting happens."""
     deduped_rows = []
@@ -184,13 +190,15 @@ def dedupe_email_rows(rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]],
 
 
 def assign_unique_message_ids(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Create unique message IDs from to/from values, with suffixes as needed."""
+    """Create unique, deterministic message IDs with a hashed subject component."""
     counters = {}
 
     for row in rows:
+        subject_part = stable_subject_hash(str(row.get("subject", "") or ""))
         from_part = sanitize_message_part(str(row.get("from", "") or ""))
         to_part = sanitize_message_part(str(row.get("to", "") or ""))
-        base_parts = [part for part in (from_part, to_part) if part]
+        sent_part = sanitize_message_part(normalize_sent_at_for_dedupe(str(row.get("sent_at", "") or "")))
+        base_parts = [part for part in (subject_part, to_part, from_part, sent_part) if part]
         base_id = "__".join(base_parts) if base_parts else sanitize_message_part(str(row.get("thread_id", "") or "")) or "message"
 
         count = counters.get(base_id, 0) + 1
