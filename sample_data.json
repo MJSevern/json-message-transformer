@@ -1,35 +1,24 @@
 [
   {
-    "id": 1,
-    "name": "Alice Johnson",
-    "email": "alice@example.com",
-    "department": {
-      "name": "Engineering",
-      "location": "New York"
+    "attributes": {
+      "type": "EmailMessage",
+      "url": "/services/data/v65.0/sobjects/EmailMessage/02sEXAMPLE0001AAA"
     },
-    "skills": ["Python", "JavaScript", "React"],
-    "salary": 95000
+    "Id": "02sEXAMPLE0001AAA",
+    "Headers": "In-Reply-To: <thread-001@example.test>\nReferences: <thread-001@example.test>",
+    "CreatedDate": "2026-03-10T14:25:00.000+0000",
+    "Subject": "RE: Temperature excursion review [ ref:sample-thread-001:ref ]",
+    "TextBody": "Hi team,\n\nThe shipment review is complete. No excursion was confirmed.\n\nBest regards,\nAlex Morgan\n\nFrom: Customer Ops <ops@example.test>\nSent: Tuesday, March 10, 2026 9:02 AM\nTo: Alex Morgan <alex.morgan@example.test>\nSubject: Temperature excursion review [ ref:sample-thread-001:ref ]\n\nHello,\n\nCan you confirm whether the logger showed any excursion on this shipment?\n\nThanks,\nCustomer Ops"
   },
   {
-    "id": 2,
-    "name": "Bob Smith",
-    "email": "bob@example.com",
-    "department": {
-      "name": "Marketing",
-      "location": "Los Angeles"
+    "attributes": {
+      "type": "EmailMessage",
+      "url": "/services/data/v65.0/sobjects/EmailMessage/02sEXAMPLE0002AAA"
     },
-    "skills": ["SEO", "Content Marketing"],
-    "salary": 65000
-  },
-  {
-    "id": 3,
-    "name": "Carol Davis",
-    "email": "carol@example.com",
-    "department": {
-      "name": "Engineering",
-      "location": "San Francisco"
-    },
-    "skills": ["Database Design", "SQL", "Python"],
-    "salary": 102000
+    "Id": "02sEXAMPLE0002AAA",
+    "Headers": "In-Reply-To: <thread-002@example.test>\nReferences: <thread-002@example.test>",
+    "CreatedDate": "2026-03-11T08:40:00.000+0000",
+    "Subject": "Pickup confirmation [ ref:sample-thread-002:ref ]",
+    "TextBody": "Good morning,\n\nPickup has been confirmed for 15:30 local time.\n\nRegards,\nWarehouse Desk"
   }
 ]

@@ -28,7 +28,7 @@ The converter can:
 - `json_to_csv.py`: main converter
 - `fix_json.py`: removes invisible characters from malformed JSON
 - `validate_json.py`: validates JSON and shows basic structure info
-- `sample_data.json`: small sample input
+- `sample_data.json`: small email-style sample input
 
 ## Quick Start
 
@@ -155,8 +155,16 @@ python3 json_to_csv.py input_fixed.json --split-thread -o output.csv
 
 ## Example With Included Sample File
 
+The included `sample_data.json` is fake data, but it follows the same email-message structure the converter is designed for.
+
 ```bash
 python3 json_to_csv.py sample_data.json -o sample_output.csv
+```
+
+To test thread splitting with the sample file:
+
+```bash
+python3 json_to_csv.py sample_data.json --split-thread -o sample_output.csv
 ```
 
 ## Notes And Limitations
