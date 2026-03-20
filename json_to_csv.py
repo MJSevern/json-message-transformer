@@ -55,6 +55,7 @@ REPLY_INTRO_PATTERNS = (
     r"^El (.+?) escribió\s*:\s*$",
     r"^Em (.+?) escreveu\s*:\s*$",
 )
+OUTPUT_TIMESTAMP_FORMAT = "%d/%m/%Y %H:%M"
 
 
 def flatten_dict(data: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dict[str, Any]:
@@ -162,6 +163,54 @@ def stable_subject_hash(subject: str, length: int = 12) -> str:
     """Return a deterministic ASCII-safe hash prefix for the subject."""
     digest = hashlib.sha256((subject or "").strip().lower().encode("utf-8")).hexdigest()
     return digest[:length]
+
+
+def extract_datetime_fragment(value: str) -> str:
+    """Extract the timestamp portion from a noisy header or reply-intro line."""
+    value = (value or "").strip()
+    patterns = (
+        r"([A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s+[AP]M)",
+        r"([A-Za-z]{3},\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s*[AP]M)",
+        r"(\d{1,2}/\d{1,2}/\d{4},\s*\d{1,2}:\d{2}\s*[AP]M)",
+        r"(\d{1,2}/\d{1,2}/\d{4},\s*\d{1,2}:\d{2})",
+        r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?[+-]\d{4})",
+    )
+
+    for pattern in patterns:
+        match = re.search(pattern, value, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return value
+
+
+def normalize_sent_at_for_output(value: str) -> str:
+    """Normalize timestamps to a consistent day-first format for CSV output."""
+    value = extract_datetime_fragment(value)
+    value = re.sub(r"\s+", " ", value.replace(" at ", " ")).strip()
+    if not value:
+        return ""
+
+    formats = (
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%A, %B %d, %Y %I:%M %p",
+        "%a, %b %d, %Y %I:%M %p",
+        "%A, %d %B %Y %H:%M",
+        "%a, %d %b %Y %H:%M",
+        "%m/%d/%Y, %I:%M %p",
+        "%d/%m/%Y, %H:%M",
+        "%m/%d/%Y %I:%M %p",
+        "%d/%m/%Y %H:%M",
+    )
+
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(value, fmt)
+            return parsed.strftime(OUTPUT_TIMESTAMP_FORMAT)
+        except ValueError:
+            continue
+
+    return value
 
 
 def dedupe_email_rows(rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
@@ -280,7 +329,7 @@ def normalize_message_body_for_dedupe(text: str) -> str:
 
 def normalize_sent_at_for_dedupe(value: str) -> str:
     """Normalize timestamps to minute precision for duplicate detection."""
-    value = (value or "").strip()
+    value = extract_datetime_fragment((value or "").strip())
     if not value:
         return ""
 
@@ -452,7 +501,7 @@ def parse_segment_metadata(segment: str) -> Tuple[Dict[str, str], str]:
 
         on_wrote_span, on_wrote_sent_at = get_reply_intro_info(lines, idx) if idx == 0 else (0, "")
         if on_wrote_span:
-            metadata["sent_at"] = metadata["sent_at"] or on_wrote_sent_at
+            metadata["sent_at"] = metadata["sent_at"] or extract_datetime_fragment(on_wrote_sent_at)
             body_start = idx + on_wrote_span
             continue
 
@@ -546,7 +595,7 @@ def transform_email_message_row(row: Dict[str, Any], split_thread: bool = False)
             last_known_sent_at = sent_at
         transformed_rows.append({
             "message_id": base_message_id if index == 0 else f"{base_message_id}#{index}",
-            "sent_at": sent_at,
+            "sent_at": normalize_sent_at_for_output(sent_at),
             "from": from_value if index == 0 else metadata["from"],
             "message_body": final_body,
             "subject": subject if index == 0 else (metadata["subject"] or subject),
