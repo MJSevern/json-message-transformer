@@ -56,6 +56,7 @@ REPLY_INTRO_PATTERNS = (
     r"^Em (.+?) escreveu\s*:\s*$",
 )
 OUTPUT_TIMESTAMP_FORMAT = "%d/%m/%Y %H:%M"
+MAX_ID_LENGTH = 64
 
 
 def flatten_dict(data: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dict[str, Any]:
@@ -165,6 +166,22 @@ def stable_subject_hash(subject: str, length: int = 12) -> str:
     return digest[:length]
 
 
+def stable_token(*parts: str, length: int = 12) -> str:
+    """Build a deterministic lowercase alphanumeric token from one or more inputs."""
+    digest = hashlib.sha256("\x1f".join((part or "").strip().lower() for part in parts).encode("utf-8")).hexdigest()
+    return digest[:length]
+
+
+def normalize_upload_id(value: str, prefix: str, fallback_parts: Tuple[str, ...] = ()) -> str:
+    """Return an upload-safe ID with lowercase ASCII letters and digits only."""
+    cleaned = re.sub(r"[^a-z0-9]+", "", (value or "").strip().lower())
+    if cleaned:
+        suffix = cleaned[: max(1, MAX_ID_LENGTH - len(prefix))]
+    else:
+        suffix = stable_token(*fallback_parts, length=max(12, MAX_ID_LENGTH - len(prefix)))
+    return f"{prefix}{suffix}"[:MAX_ID_LENGTH]
+
+
 def extract_datetime_fragment(value: str) -> str:
     """Extract the timestamp portion from a noisy header or reply-intro line."""
     value = (value or "").strip()
@@ -239,20 +256,29 @@ def dedupe_email_rows(rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]],
 
 
 def assign_unique_message_ids(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Create unique, deterministic message IDs with a hashed subject component."""
+    """Create unique, deterministic message IDs that satisfy upload validators."""
     counters = {}
 
     for row in rows:
-        subject_part = stable_subject_hash(str(row.get("subject", "") or ""))
-        from_part = sanitize_message_part(str(row.get("from", "") or ""))
-        to_part = sanitize_message_part(str(row.get("to", "") or ""))
-        sent_part = sanitize_message_part(normalize_sent_at_for_dedupe(str(row.get("sent_at", "") or "")))
-        base_parts = [part for part in (subject_part, to_part, from_part, sent_part) if part]
-        base_id = "__".join(base_parts) if base_parts else sanitize_message_part(str(row.get("thread_id", "") or "")) or "message"
+        base_id = normalize_upload_id(
+            str(row.get("message_id", "") or ""),
+            prefix="msg",
+            fallback_parts=(
+                str(row.get("thread_id", "") or ""),
+                str(row.get("subject", "") or ""),
+                str(row.get("from", "") or ""),
+                str(row.get("to", "") or ""),
+                normalize_sent_at_for_dedupe(str(row.get("sent_at", "") or "")),
+            ),
+        )
 
         count = counters.get(base_id, 0) + 1
         counters[base_id] = count
-        row["message_id"] = base_id if count == 1 else f"{base_id}_{count}"
+        row["message_id"] = base_id if count == 1 else normalize_upload_id(
+            f"{base_id}{count}",
+            prefix="msg",
+            fallback_parts=(base_id, str(count)),
+        )
 
     return rows
 
@@ -565,7 +591,12 @@ def transform_email_message_row(row: Dict[str, Any], split_thread: bool = False)
         text_body,
     )
 
-    thread_id = extract_thread_id(subject, text_body, headers) or base_message_id
+    raw_thread_id = extract_thread_id(subject, text_body, headers) or base_message_id
+    thread_id = normalize_upload_id(
+        raw_thread_id,
+        prefix="thr",
+        fallback_parts=(base_message_id, subject, headers, text_body),
+    )
 
     if not split_thread:
         trimmed_body = trim_thread_to_limit(text_body)
