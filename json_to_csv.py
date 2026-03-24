@@ -230,6 +230,60 @@ def normalize_sent_at_for_output(value: str) -> str:
     return value
 
 
+def split_inline_headers(value: str) -> List[str]:
+    """Split malformed single-line header blobs into separate header-like chunks."""
+    normalized = re.sub(r"\s+", " ", value or "").strip()
+    if not normalized:
+        return []
+
+    markers = ("From:", "De:", "Da:", "Sent:", "Envoyé:", "Envoye:", "Inviato:", "Enviado:", "To:", "A:", "À:", "Para:", "Cc:", "Subject:", "Objet:", "Oggetto:", "Asunto:", "Assunto:")
+    parts = [normalized]
+    for marker in markers:
+        next_parts = []
+        pattern = re.compile(rf"(?<!^)\s+(?={re.escape(marker)})", re.IGNORECASE)
+        for part in parts:
+            next_parts.extend(pattern.split(part))
+        parts = next_parts
+    return [part.strip() for part in parts if part.strip()]
+
+
+def truncate_utf8_bytes(value: str, max_bytes: int) -> str:
+    """Trim text to a UTF-8 byte budget without splitting a code point."""
+    encoded = (value or "").encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value or ""
+    return encoded[:max_bytes].decode("utf-8", errors="ignore").rstrip()
+
+
+def compact_address_value(value: str, single: bool = False) -> str:
+    """Normalize sender/recipient cells to compact semicolon-delimited email addresses."""
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return ""
+
+    cleaned = re.sub(r"<mailto:([^>]+)>", r"<\1>", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+
+    email_pattern = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+    emails = []
+    seen = set()
+    for email in email_pattern.findall(cleaned):
+        lowered = email.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        emails.append(lowered)
+
+    if emails:
+        compact = emails[:1] if single else emails
+        return ";".join(compact)
+
+    # Fall back to a compact text representation if no address can be extracted.
+    cleaned = re.split(r"\s+(?:Sent|To|Cc|Subject|De|Da|A|À|Para|Objet|Oggetto|Asunto|Assunto):", cleaned, maxsplit=1, flags=re.IGNORECASE)[0]
+    cleaned = truncate_utf8_bytes(cleaned, 512).strip(" ;,")
+    return cleaned
+
+
 def dedupe_email_rows(rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
     """Remove duplicate email records before any message splitting happens."""
     deduped_rows = []
@@ -475,22 +529,22 @@ def trim_thread_to_limit(text_body: str, max_length: int = MAX_MESSAGE_BODY_LENG
     until the body fits within the requested length.
     """
     normalized_body = text_body.strip()
-    if len(normalized_body) <= max_length:
+    if len(normalized_body.encode("utf-8")) <= max_length:
         return normalized_body
 
     segments = split_thread_segments(normalized_body)
     if not segments:
-        return normalized_body[:max_length].rstrip()
+        return truncate_utf8_bytes(normalized_body, max_length)
 
     kept_segments = list(segments)
-    while len("\n\n".join(kept_segments)) > max_length and len(kept_segments) > 1:
+    while len("\n\n".join(kept_segments).encode("utf-8")) > max_length and len(kept_segments) > 1:
         kept_segments.pop()
 
     trimmed_body = "\n\n".join(kept_segments).strip()
-    if len(trimmed_body) <= max_length:
+    if len(trimmed_body.encode("utf-8")) <= max_length:
         return trimmed_body
 
-    return trimmed_body[:max_length].rstrip()
+    return truncate_utf8_bytes(trimmed_body, max_length)
 
 
 def parse_segment_metadata(segment: str) -> Tuple[Dict[str, str], str]:
@@ -504,13 +558,18 @@ def parse_segment_metadata(segment: str) -> Tuple[Dict[str, str], str]:
     last_header_key = ""
 
     for idx, line in enumerate(lines):
-        stripped = normalize_header_line(line)
+        expanded_lines = split_inline_headers(normalize_header_line(line))
+        stripped = expanded_lines[0] if expanded_lines else ""
         if not stripped:
             body_start = idx + 1
             break
 
-        match = match_header_line(stripped)
-        if match:
+        header_chunks = expanded_lines if expanded_lines else [stripped]
+        matched_any_header = False
+        for chunk in header_chunks:
+            match = match_header_line(chunk)
+            if not match:
+                continue
             key = canonical_header_key(match.group(1))
             value = match.group(2).strip()
             if key == "sent":
@@ -522,6 +581,8 @@ def parse_segment_metadata(segment: str) -> Tuple[Dict[str, str], str]:
             elif key == "to":
                 metadata["to"] = value
             last_header_key = key
+            matched_any_header = True
+        if matched_any_header:
             body_start = idx + 1
             continue
 
@@ -552,6 +613,8 @@ def parse_segment_metadata(segment: str) -> Tuple[Dict[str, str], str]:
             cleaned = ""
         body_lines.append(cleaned)
     body = normalize_whitespace("\n".join(body_lines))
+    metadata["from"] = compact_address_value(metadata["from"], single=True)
+    metadata["to"] = compact_address_value(metadata["to"])
     return metadata, body
 
 
@@ -576,20 +639,20 @@ def transform_email_message_row(row: Dict[str, Any], split_thread: bool = False)
     headers = str(row.get("Headers", "") or "")
     base_message_id = str(row.get("Id", "") or "")
 
-    to_value = extract_first_match(
+    to_value = compact_address_value(extract_first_match(
         [
             r"^To:\s*(.+)$",
         ],
         text_body,
-    )
-    from_value = extract_first_match(
+    ))
+    from_value = compact_address_value(extract_first_match(
         [
             r"^From:\s*(.+)$",
             r"^De:\s*(.+)$",
             r"^Da:\s*(.+)$",
         ],
         text_body,
-    )
+    ), single=True)
 
     raw_thread_id = extract_thread_id(subject, text_body, headers) or base_message_id
     thread_id = normalize_upload_id(
@@ -619,6 +682,7 @@ def transform_email_message_row(row: Dict[str, Any], split_thread: bool = False)
     for index, segment in enumerate(segments):
         metadata, body = parse_segment_metadata(segment)
         final_body = body if body else normalize_whitespace(segment)
+        final_body = trim_thread_to_limit(final_body, max_length=MAX_MESSAGE_BODY_LENGTH)
         if not final_body or re.fullmatch(r"[>\s]*", final_body):
             continue
         sent_at = row.get("CreatedDate", "") if index == 0 else (metadata["sent_at"] or last_known_sent_at)
