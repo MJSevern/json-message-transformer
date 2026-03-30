@@ -11,6 +11,7 @@ import argparse
 import re
 import hashlib
 import io
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -57,6 +58,88 @@ REPLY_INTRO_PATTERNS = (
 )
 OUTPUT_TIMESTAMP_FORMAT = "%d/%m/%Y %H:%M"
 MAX_ID_LENGTH = 64
+DATETIME_TOKEN_REPLACEMENTS = (
+    ("seg", "Mon"),
+    ("ter", "Tue"),
+    ("qua", "Wed"),
+    ("qui", "Thu"),
+    ("sex", "Fri"),
+    ("sab", "Sat"),
+    ("dom", "Sun"),
+    ("lun", "Mon"),
+    ("mie", "Wed"),
+    ("jue", "Thu"),
+    ("vie", "Fri"),
+    ("segunda-feira", "Mon"),
+    ("terca-feira", "Tue"),
+    ("terça-feira", "Tue"),
+    ("quarta-feira", "Wed"),
+    ("quinta-feira", "Thu"),
+    ("sexta-feira", "Fri"),
+    ("sabado", "Sat"),
+    ("sábado", "Sat"),
+    ("domingo", "Sun"),
+    ("lunes", "Mon"),
+    ("martes", "Tue"),
+    ("miercoles", "Wed"),
+    ("miércoles", "Wed"),
+    ("jueves", "Thu"),
+    ("viernes", "Fri"),
+    ("enero", "January"),
+    ("febrero", "February"),
+    ("marzo", "March"),
+    ("abril", "April"),
+    ("mayo", "May"),
+    ("junio", "June"),
+    ("julio", "July"),
+    ("agosto", "August"),
+    ("septiembre", "September"),
+    ("setiembre", "September"),
+    ("octubre", "October"),
+    ("noviembre", "November"),
+    ("diciembre", "December"),
+    ("gennaio", "January"),
+    ("febbraio", "February"),
+    ("marzo", "March"),
+    ("aprile", "April"),
+    ("maggio", "May"),
+    ("giugno", "June"),
+    ("luglio", "July"),
+    ("agosto", "August"),
+    ("settembre", "September"),
+    ("ottobre", "October"),
+    ("novembre", "November"),
+    ("dicembre", "December"),
+    ("janeiro", "January"),
+    ("fevereiro", "February"),
+    ("marco", "March"),
+    ("março", "March"),
+    ("abril", "April"),
+    ("maio", "May"),
+    ("junho", "June"),
+    ("julho", "July"),
+    ("agosto", "August"),
+    ("setembro", "September"),
+    ("outubro", "October"),
+    ("novembro", "November"),
+    ("dezembro", "December"),
+    ("ene", "Jan"),
+    ("fev", "Feb"),
+    ("feb", "Feb"),
+    ("mar", "Mar"),
+    ("abr", "Apr"),
+    ("mai", "May"),
+    ("jun", "Jun"),
+    ("jul", "Jul"),
+    ("ago", "Aug"),
+    ("sep", "Sep"),
+    ("set", "Sep"),
+    ("oct", "Oct"),
+    ("out", "Oct"),
+    ("nov", "Nov"),
+    ("dic", "Dec"),
+    ("dez", "Dec"),
+)
 
 
 def flatten_dict(data: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dict[str, Any]:
@@ -185,11 +268,36 @@ def normalize_upload_id(value: str, prefix: str, fallback_parts: Tuple[str, ...]
 def extract_datetime_fragment(value: str) -> str:
     """Extract the timestamp portion from a noisy header or reply-intro line."""
     value = (value or "").strip()
+    value = value.replace("年", "/").replace("月", "/").replace("日", " ")
+    value = re.sub(r"(?<=\d)\?(?=\d)", "/", value)
+    value = re.sub(r"(?<=\d)\?(?=\s)", "", value)
+    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    value = re.sub(r"\bde\b", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bas\b", " ", value, flags=re.IGNORECASE)
+    value = value.replace(" at ", " ")
+    value = re.sub(r"(?<=[A-Za-z])\.(?=[A-Za-z])", "", value)
+    for src, dst in DATETIME_TOKEN_REPLACEMENTS:
+        value = re.sub(rf"\b{re.escape(src)}\b", dst, value, flags=re.IGNORECASE)
+    value = re.sub(r"\b([A-Za-z]{3})\.(?=[,\s])", r"\1", value)
+    value = re.sub(r"\s+", " ", value).strip(" ,")
     patterns = (
+        r"([A-Za-z]{3}\s+\d{1,2},\s+\d{4},\s+\d{1,2}:\d{2}\s*[AP]M)",
+        r"([A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s+\d{4},\s+\d{1,2}:\d{2}\s*[AP]M)",
         r"([A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s+[AP]M)",
+        r"([A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}(?:\s+[A-Z]{2,5})?)",
+        r"([A-Za-z]{3},\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4},\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)",
+        r"([A-Za-z]{3},\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)",
+        r"([A-Za-z]{3},\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4},\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)",
+        r"([A-Za-z]{3},\s+\d{1,2}\s+[A-Za-z]+\s+\d{4}\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)",
         r"([A-Za-z]{3},\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s*[AP]M)",
+        r"([A-Za-z]+,\s+\d{1,2}\s+[A-Za-z]+\s+\d{4}\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)",
+        r"([A-Za-z]+\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s*[AP]M(?:\s+[A-Z]{2,5})?)",
+        r"([A-Za-z]+\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s*[AP]M(?:\s+[A-Z]{2,5})?)",
+        r"([A-Za-z]+\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}(?:\s+[A-Z]{2,5})?)",
+        r"(\d{1,2}\s+[A-Za-z]+\s+\d{4}\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)",
         r"(\d{1,2}/\d{1,2}/\d{4},\s*\d{1,2}:\d{2}\s*[AP]M)",
         r"(\d{1,2}/\d{1,2}/\d{4},\s*\d{1,2}:\d{2})",
+        r"(\d{4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2})",
         r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?[+-]\d{4})",
     )
 
@@ -204,20 +312,40 @@ def normalize_sent_at_for_output(value: str) -> str:
     """Normalize timestamps to a consistent day-first format for CSV output."""
     value = extract_datetime_fragment(value)
     value = re.sub(r"\s+", " ", value.replace(" at ", " ")).strip()
+    value = re.sub(r"\s+(?!AM$|PM$)[A-Z]{2,5}$", "", value).strip()
     if not value:
         return ""
 
     formats = (
         "%Y-%m-%dT%H:%M:%S.%f%z",
         "%Y-%m-%dT%H:%M:%S%z",
+        "%A, %B %d, %Y, %I:%M %p",
+        "%b %d, %Y, %I:%M %p",
+        "%B %d, %Y %I:%M %p",
         "%A, %B %d, %Y %I:%M %p",
         "%a, %b %d, %Y %I:%M %p",
+        "%a, %b %d, %Y, %I:%M %p",
+        "%a, %b %d, %Y, %H:%M",
+        "%a, %b %d, %Y %H:%M",
+        "%a, %d %b %Y, %H:%M",
+        "%a, %d %b %Y %H:%M",
+        "%a, %d %B %Y, %H:%M",
+        "%a, %d %B %Y %H:%M",
+        "%B %d, %Y %H:%M",
+        "%A, %B %d, %Y %H:%M",
+        "%a, %b %d, %Y %H:%M",
+        "%A, %d %B %Y %I:%M %p",
         "%A, %d %B %Y %H:%M",
         "%a, %d %b %Y %H:%M",
+        "%d %B %Y %I:%M %p",
+        "%d %B %Y %H:%M",
+        "%d %b %Y %H:%M",
         "%m/%d/%Y, %I:%M %p",
+        "%m/%d/%Y, %H:%M",
         "%d/%m/%Y, %H:%M",
         "%m/%d/%Y %I:%M %p",
         "%d/%m/%Y %H:%M",
+        "%Y/%m/%d %H:%M",
     )
 
     for fmt in formats:
@@ -228,6 +356,24 @@ def normalize_sent_at_for_output(value: str) -> str:
             continue
 
     return value
+
+
+def is_normalized_output_timestamp(value: str) -> bool:
+    """Return whether a timestamp already matches the output format."""
+    return bool(re.fullmatch(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}", value or ""))
+
+
+def coerce_output_timestamp(candidate: str, fallback: str = "") -> str:
+    """Normalize a timestamp and fall back to a known-good timestamp if needed."""
+    normalized = normalize_sent_at_for_output(candidate)
+    if is_normalized_output_timestamp(normalized):
+        return normalized
+
+    normalized_fallback = normalize_sent_at_for_output(fallback)
+    if is_normalized_output_timestamp(normalized_fallback):
+        return normalized_fallback
+
+    return ""
 
 
 def split_inline_headers(value: str) -> List[str]:
@@ -410,14 +556,34 @@ def normalize_message_body_for_dedupe(text: str) -> str:
 def normalize_sent_at_for_dedupe(value: str) -> str:
     """Normalize timestamps to minute precision for duplicate detection."""
     value = extract_datetime_fragment((value or "").strip())
+    value = re.sub(r"\s+", " ", value.replace(" at ", " ")).strip()
+    value = re.sub(r"\s+(?!AM$|PM$)[A-Z]{2,5}$", "", value).strip()
     if not value:
         return ""
 
     formats = (
         "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%A, %B %d, %Y, %I:%M %p",
+        "%b %d, %Y, %I:%M %p",
+        "%B %d, %Y %I:%M %p",
         "%A, %B %d, %Y %I:%M %p",
+        "%a, %b %d, %Y, %I:%M %p",
+        "%a, %b %d, %Y, %H:%M",
+        "%a, %b %d, %Y %H:%M",
+        "%a, %d %b %Y, %H:%M",
+        "%a, %d %b %Y %H:%M",
+        "%a, %d %B %Y, %H:%M",
+        "%a, %d %B %Y %H:%M",
+        "%B %d, %Y %H:%M",
+        "%A, %B %d, %Y %H:%M",
+        "%A, %d %B %Y %I:%M %p",
+        "%d %B %Y %I:%M %p",
+        "%d %B %Y %H:%M",
         "%m/%d/%Y, %I:%M %p",
+        "%m/%d/%Y, %H:%M",
         "%d/%m/%Y, %H:%M",
+        "%Y/%m/%d %H:%M",
     )
 
     for fmt in formats:
@@ -663,9 +829,10 @@ def transform_email_message_row(row: Dict[str, Any], split_thread: bool = False)
 
     if not split_thread:
         trimmed_body = trim_thread_to_limit(text_body)
+        normalized_sent_at = coerce_output_timestamp(str(row.get("CreatedDate", "") or ""))
         return [{
             "message_id": base_message_id,
-            "sent_at": row.get("CreatedDate", ""),
+            "sent_at": normalized_sent_at,
             "from": from_value,
             "message_body": trimmed_body,
             "subject": subject,
@@ -678,19 +845,21 @@ def transform_email_message_row(row: Dict[str, Any], split_thread: bool = False)
         segments = [text_body]
 
     transformed_rows = []
-    last_known_sent_at = str(row.get("CreatedDate", "") or "")
+    root_sent_at = str(row.get("CreatedDate", "") or "")
+    last_known_sent_at = coerce_output_timestamp(root_sent_at)
     for index, segment in enumerate(segments):
         metadata, body = parse_segment_metadata(segment)
         final_body = body if body else normalize_whitespace(segment)
         final_body = trim_thread_to_limit(final_body, max_length=MAX_MESSAGE_BODY_LENGTH)
         if not final_body or re.fullmatch(r"[>\s]*", final_body):
             continue
-        sent_at = row.get("CreatedDate", "") if index == 0 else (metadata["sent_at"] or last_known_sent_at)
-        if sent_at:
-            last_known_sent_at = sent_at
+        sent_at_source = root_sent_at if index == 0 else (metadata["sent_at"] or last_known_sent_at or root_sent_at)
+        normalized_sent_at = coerce_output_timestamp(sent_at_source, fallback=last_known_sent_at or root_sent_at)
+        if normalized_sent_at:
+            last_known_sent_at = normalized_sent_at
         transformed_rows.append({
             "message_id": base_message_id if index == 0 else f"{base_message_id}#{index}",
-            "sent_at": normalize_sent_at_for_output(sent_at),
+            "sent_at": normalized_sent_at,
             "from": from_value if index == 0 else metadata["from"],
             "message_body": final_body,
             "subject": subject if index == 0 else (metadata["subject"] or subject),
